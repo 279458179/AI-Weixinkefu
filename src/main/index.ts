@@ -104,7 +104,11 @@ app.whenReady().then(async () => {
       })
       const device = new RPADevice()
       device.setAppType(config.appType || 'weixin')
-      device.setApiKey(config.apiKey)
+      device.setAIConfig({
+        apiKey: config.apiKey,
+        model: config.model,
+        baseURL: config.baseURL
+      })
       const mainWindow = BrowserWindow.getAllWindows()[0]
       engine = new Engine(localHooks, device, (type, content) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -135,8 +139,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('engine:updateConfig', async (_event, config) => {
     if (localHooks) {
       localHooks.updateAIConfig(config)
-      if (engine && config.appType) {
-        (engine as any).device?.setAppType(config.appType)
+      if (engine) {
+        if (config.appType) {
+          (engine as any).device?.setAppType(config.appType)
+        }
+        if (config.apiKey) {
+          (engine as any).device?.setAIConfig({
+            apiKey: config.apiKey,
+            model: config.model,
+            baseURL: config.baseURL
+          })
+        }
       }
       return { success: true }
     }

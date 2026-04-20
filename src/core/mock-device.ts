@@ -15,6 +15,10 @@ export class MockDevice implements DesktopDevice {
     // Mock: 不需要 API key
   }
 
+  setAIConfig(_config: { apiKey: string; model?: string; baseURL?: string }): void {
+    // Mock: 不需要 AI 配置
+  }
+
   async measureLayout(): Promise<{ success: boolean; error?: string }> {
     console.log('[MockDevice] 布局测量（模拟）✓')
     return { success: true }

@@ -312,7 +312,7 @@ function SettingsPanel() {
           <input
             className="form-input"
             value={model}
-            disabled
+            onChange={(e) => setModel(e.target.value)}
             placeholder={t('settings.model.placeholder')}
           />
         </div>

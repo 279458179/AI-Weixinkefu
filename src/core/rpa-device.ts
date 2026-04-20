@@ -41,6 +41,11 @@ export class RPADevice implements DesktopDevice {
     this.aiClient = new AIClient({ apiKey })
   }
 
+  setAIConfig(config: { apiKey: string; model?: string; baseURL?: string }): void {
+    if (!config.apiKey) return
+    this.aiClient = new AIClient(config)
+  }
+
   // ── 感知层 ──
 
   /**
