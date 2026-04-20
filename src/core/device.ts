@@ -57,7 +57,7 @@ export interface DesktopDevice {
    */
   setChatBaseline(): Promise<boolean>
 
-  /**好的，辛苦啦~后续要是有临时调整我再及时和你说。
+  /**
    *
    * 检查 chatMainArea 是否有变化（和 baseline 对比）
    * 发现变化说明当前对话有新消息进来
