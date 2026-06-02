@@ -1,7 +1,7 @@
 // src/core/ai-client.ts
 // AI 客户端 — 统一封装所有大模型调用
 //
-// 使用火山引擎 Ark /responses 端点 + doubao-seed-2-0-lite
+// 使用火山引擎 Ark /responses 端点 + qwen3.6-plus
 // 两种用途：
 //   1. 聊天回复：截图 → AI 分析 → 回复文字
 //   2. VLM 视觉检测：截图 → AI 分析 → bbox/point 坐标
@@ -13,7 +13,7 @@ export interface AIClientConfig {
   systemPrompt: string
 }
 
-const DEFAULT_MODEL = 'doubao-seed-2-0-lite-260215'
+const DEFAULT_MODEL = 'qwen3.6-plus'
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 
 const REPLY_SYSTEM_PROMPT = `你是一个微信自动回复助手。你会收到一张微信/企业微信的聊天窗口截图。

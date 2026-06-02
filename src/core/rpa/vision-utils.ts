@@ -95,6 +95,21 @@ export function parseBBoxes(text: string): BBox[] {
     }
   }
 
+  // 3. 支持 <box>[x1,y1,x2,y2]</box> 格式（qwen 等模型返回格式）
+  if (bboxes.length === 0) {
+    regex = /<box>\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\]\s*<\/box>/gi
+
+    while ((match = regex.exec(text)) !== null) {
+      const x1 = Number(match[1])
+      const y1 = Number(match[2])
+      const x2 = Number(match[3])
+      const y2 = Number(match[4])
+      if ([x1, y1, x2, y2].every((v) => Number.isFinite(v))) {
+        bboxes.push([Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)])
+      }
+    }
+  }
+
   return bboxes
 }
 

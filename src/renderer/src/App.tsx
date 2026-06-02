@@ -216,7 +216,7 @@ function BottomBar({
 // ─── Settings Panel ───
 function SettingsPanel() {
   const [apiKey, setApiKey] = useState('')
-  const [model, setModel] = useState('doubao-seed-2-0-lite-260215')
+  const [model, setModel] = useState('qwen3.6-plus')
   const [baseURL, setBaseURL] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [appType, setAppType] = useState<'weixin' | 'wework'>('weixin')
@@ -227,7 +227,7 @@ function SettingsPanel() {
     window.electron?.invoke('settings:getAll').then((settings: any) => {
       if (settings) {
         setApiKey(settings.apiKey || '')
-        setModel('doubao-seed-2-0-lite-260215')
+        setModel(settings.model || 'qwen3.6-plus')
         setBaseURL(settings.baseURL || '')
         setSystemPrompt(settings.systemPrompt || '')
         setAppType(settings.appType || 'weixin')
