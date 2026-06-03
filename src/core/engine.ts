@@ -259,7 +259,12 @@ export class Engine {
       switch (action.type) {
         case 'text':
           this.emitLog('reply', `[回复] ${action.content}`)
-          await this.device.sendMessage(action.content)
+          try {
+            await this.device.sendMessage(action.content)
+            this.emitLog('skip', '发送成功')
+          } catch (sendErr: any) {
+            this.emitLog('error', `发送失败: ${sendErr.message || String(sendErr)}`)
+          }
           this.hooks.onActionComplete?.(
             { type: 'text', content: action.content } as ActionItem,
             { success: true }

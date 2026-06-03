@@ -2,10 +2,9 @@ import { clipboard } from 'electron'
 import { AppType } from './types'
 import { getWindowInfo } from './window-utils'
 import { getInputAreaFromCache } from './vision-utils'
-const IS_WINDOWS = process.platform === 'win32'
-const IS_MAC = process.platform === 'darwin'
-
 import { delay, randomDelayIn, getRobot } from './util'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 // 原版 whatsapp-agent-demo 的贝塞尔曲线仿人滑动
 async function humanLikeMove(
@@ -128,13 +127,13 @@ export async function sendReplyAction(appType: AppType, text: string): Promise<b
     console.error('[sendReplyAction] 无法获取窗口信息')
     return false
   }
-  
+
   const robot = getRobot()
   if (!robot) {
     console.error('[sendReplyAction] RobotJS 缺失')
     return false
   }
-  
+
   let inputX: number | undefined
   let inputY: number | undefined
 
@@ -153,43 +152,31 @@ export async function sendReplyAction(appType: AppType, text: string): Promise<b
     inputX = pos.inputX
     inputY = pos.inputY
   }
-  
+
+  console.log(`[sendReplyAction] 准备发送消息，长度=${text.length}, text="${text.slice(0, 50)}..."`)
+
   try {
     // 1. Move and click internally to focus
     await humanLikeMove(inputX, inputY)
     await randomDelayIn(100, 200)
-    
+
     robot.mouseClick('left')
-    await randomDelayIn(200, 300)
-    
-    // 2. Put text in clipboard
-    clipboard.writeText(text)
-    await randomDelayIn(50, 100)
-    
-    // 3. Paste
-    if (IS_MAC) {
-      robot.keyTap('v', ['command'])
-    } else {
-      robot.keyTap('v', ['control'])
-    }
-    
     await randomDelayIn(300, 500)
-    
-    // 4. Send Message (Using whatsapp-agent-demo best practices)
+
+    // 2. Put text in clipboard and paste via Ctrl+V
+    clipboard.writeText(text)
+    await randomDelayIn(30, 60)
+
+    robot.keyTap('v', ['control'])
+    console.log(`[sendReplyAction] 粘贴完成，等待渲染...`)
+
+    // 等待微信渲染粘贴内容
+    await randomDelayIn(400, 700)
+
+    // 3. 发送：Enter
     robot.keyTap('enter')
-    
-    if (IS_WINDOWS) {
-      robot.keyTap('enter', ['control'])
-      await randomDelayIn(40, 60)
-      robot.keyTap('backspace')
-    } else {
-      robot.keyTap('enter', ['command'])
-      await randomDelayIn(20, 40)
-      robot.keyToggle('command', 'up')
-      await randomDelayIn(20, 40)
-      robot.keyTap('backspace')
-    }
-    
+    console.log(`[sendReplyAction] 已发送 Enter`)
+
     return true
   } catch (err: any) {
     console.error('[sendReplyAction] Failed:', err)

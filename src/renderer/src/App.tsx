@@ -172,7 +172,11 @@ function BottomBar({
       model: settings?.model || undefined,
       baseURL: settings?.baseURL || undefined,
       systemPrompt: settings?.systemPrompt || undefined,
-      appType: settings?.appType || 'weixin'
+      appType: settings?.appType || 'weixin',
+      ragEnabled: settings?.ragEnabled || false,
+      ragDirectory: settings?.ragDirectory || '',
+      ragMaxResults: settings?.ragMaxResults || 5,
+      ragMinScore: settings?.ragMinScore || 0.1
     }
 
     const result = await window.electron?.invoke('engine:start', config)
@@ -223,6 +227,20 @@ function SettingsPanel() {
   const [testing, setTesting] = useState(false)
   const [, setLoaded] = useState(false)
 
+  // RAG 配置
+  const [ragEnabled, setRagEnabled] = useState(false)
+  const [ragDirectory, setRagDirectory] = useState('')
+  const [ragMaxResults, setRagMaxResults] = useState(5)
+  const [ragMinScore, setRagMinScore] = useState(0.1)
+  const [ragStatus, setRagStatus] = useState<{
+    enabled: boolean
+    initialized: boolean
+    directory: string
+    documentCount: number
+    chunkCount: number
+  } | null>(null)
+  const [ragRebuilding, setRagRebuilding] = useState(false)
+
   useEffect(() => {
     window.electron?.invoke('settings:getAll').then((settings: any) => {
       if (settings) {
@@ -231,8 +249,17 @@ function SettingsPanel() {
         setBaseURL(settings.baseURL || '')
         setSystemPrompt(settings.systemPrompt || '')
         setAppType(settings.appType || 'weixin')
+        setRagEnabled(settings.ragEnabled || false)
+        setRagDirectory(settings.ragDirectory || '')
+        setRagMaxResults(settings.ragMaxResults || 5)
+        setRagMinScore(settings.ragMinScore || 0.1)
       }
       setLoaded(true)
+    })
+
+    // 获取 RAG 状态
+    window.electron?.invoke('rag:status').then((status: any) => {
+      setRagStatus(status)
     })
   }, [])
 
@@ -242,7 +269,11 @@ function SettingsPanel() {
       model,
       baseURL,
       systemPrompt,
-      appType
+      appType,
+      ragEnabled,
+      ragDirectory,
+      ragMaxResults,
+      ragMinScore
     })
 
     window.electron?.invoke('engine:updateConfig', {
@@ -250,11 +281,19 @@ function SettingsPanel() {
       model: model || undefined,
       baseURL: baseURL || undefined,
       systemPrompt: systemPrompt || undefined,
-      appType
+      appType,
+      ragEnabled,
+      ragDirectory,
+      ragMaxResults,
+      ragMinScore
     })
 
+    // 更新 RAG 状态
+    const status = await window.electron?.invoke('rag:status')
+    setRagStatus(status)
+
     showToast(t('settings.saved'), 'success')
-  }, [apiKey, model, baseURL, systemPrompt, appType])
+  }, [apiKey, model, baseURL, systemPrompt, appType, ragEnabled, ragDirectory, ragMaxResults, ragMinScore])
 
   const handleTestConnection = useCallback(async () => {
     if (!apiKey) return
@@ -350,6 +389,117 @@ function SettingsPanel() {
             {t('settings.save')}
           </button>
         </div>
+      </div>
+
+      {/* RAG 知识库配置 */}
+      <div className="card">
+        <div className="card-title">{t('settings.rag')}</div>
+
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={ragEnabled}
+              onChange={(e) => setRagEnabled(e.target.checked)}
+            />
+            {t('settings.rag.enable')}
+          </label>
+          <div className="form-hint">{t('settings.rag.enable.hint')}</div>
+        </div>
+
+        {ragEnabled && (
+          <>
+            <div className="form-group">
+              <label className="form-label">{t('settings.rag.directory')}</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="form-input"
+                  value={ragDirectory}
+                  onChange={(e) => setRagDirectory(e.target.value)}
+                  placeholder={t('settings.rag.directory.placeholder')}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    const dir = await window.electron?.invoke('dialog:openDirectory')
+                    if (dir) setRagDirectory(dir)
+                  }}
+                >
+                  {t('settings.rag.directory.browse')}
+                </button>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">{t('settings.rag.maxResults')}</label>
+              <input
+                className="form-input"
+                type="number"
+                min={1}
+                max={20}
+                value={ragMaxResults}
+                onChange={(e) => setRagMaxResults(parseInt(e.target.value) || 5)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">{t('settings.rag.minScore')}</label>
+              <input
+                className="form-input"
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                value={ragMinScore}
+                onChange={(e) => setRagMinScore(parseFloat(e.target.value) || 0.1)}
+              />
+              <div className="form-hint">{t('settings.rag.minScore.hint')}</div>
+            </div>
+
+            {/* RAG 状态 */}
+            {ragStatus && (
+              <div className="rag-status">
+                <div className="rag-status-item">
+                  <span className="rag-status-label">{t('settings.rag.status.documents')}</span>
+                  <span className="rag-status-value">{ragStatus.documentCount}</span>
+                </div>
+                <div className="rag-status-item">
+                  <span className="rag-status-label">{t('settings.rag.status.chunks')}</span>
+                  <span className="rag-status-value">{ragStatus.chunkCount}</span>
+                </div>
+                <div className="rag-status-item">
+                  <span className="rag-status-label">{t('settings.rag.status.initialized')}</span>
+                  <span className={`rag-status-value ${ragStatus.initialized ? 'success' : 'pending'}`}>
+                    {ragStatus.initialized ? t('settings.rag.status.yes') : t('settings.rag.status.no')}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                setRagRebuilding(true)
+                try {
+                  const result = await window.electron?.invoke('rag:rebuild')
+                  if (result?.success) {
+                    showToast(t('settings.rag.rebuild.success'), 'success')
+                    const status = await window.electron?.invoke('rag:status')
+                    setRagStatus(status)
+                  } else {
+                    showToast(`${t('settings.rag.rebuild.fail')}: ${result?.error || ''}`, 'error')
+                  }
+                } finally {
+                  setRagRebuilding(false)
+                }
+              }}
+              disabled={!ragDirectory || ragRebuilding}
+            >
+              {ragRebuilding ? t('settings.rag.rebuild.rebuilding') : t('settings.rag.rebuild')}
+            </button>
+          </>
+        )}
       </div>
 
     </div>

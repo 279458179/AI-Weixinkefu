@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, desktopCapturer } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, desktopCapturer, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,17 +8,29 @@ import { Engine } from '../core/engine'
 import { LocalHooks } from '../core/local-hooks'
 import { AIClient } from '../core/ai-client'
 import { RPADevice } from '../core/rpa-device'
+
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 const settingsStore = new StoreClass({
   name: 'settings',
-  defaults: { apiKey: '', model: '', baseURL: '', systemPrompt: '', locale: 'zh' }
+  defaults: {
+    apiKey: '',
+    model: '',
+    baseURL: '',
+    systemPrompt: '',
+    locale: 'zh',
+    appType: 'weixin',
+    // RAG 配置
+    ragEnabled: false,
+    ragDirectory: '',
+    ragMaxResults: 5,
+    ragMinScore: 0.1
+  }
 })
 
 let engine: Engine | null = null
 let localHooks: LocalHooks | null = null
 
 function createWindow(): void {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 420,
     height: 700,
@@ -28,7 +40,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 12 },
-    backgroundColor: '#0a0b10',
+    backgroundColor: '#ffffff',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -45,8 +57,6 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -54,24 +64,15 @@ function createWindow(): void {
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
-  // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
-  // 检查和请求 macOS 需要的权限
   await checkAndRequestPermissions()
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
   // ── Settings 持久化 ──
@@ -90,18 +91,38 @@ app.whenReady().then(async () => {
     return { success: true }
   })
 
+  // ── 文件目录选择对话框 ──
+  ipcMain.handle('dialog:openDirectory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
   // ── Engine 操控 ──
   ipcMain.handle('engine:start', async (_event, config) => {
     if (engine?.isRunning()) return { success: false, error: '引擎已在运行中' }
     try {
+      // 构建 RAG 配置
+      const ragConfig = config.ragEnabled
+        ? {
+            enabled: true,
+            directory: config.ragDirectory || '',
+            maxResults: config.ragMaxResults || 5,
+            minScore: config.ragMinScore || 0.1
+          }
+        : undefined
+
       localHooks = new LocalHooks({
         ai: {
           apiKey: config.apiKey,
           model: config.model,
           baseURL: config.baseURL,
           systemPrompt: config.systemPrompt
-        }
+        },
+        rag: ragConfig
       })
+
       const device = new RPADevice()
       device.setAppType(config.appType || 'weixin')
       device.setAIConfig({
@@ -109,17 +130,18 @@ app.whenReady().then(async () => {
         model: config.model,
         baseURL: config.baseURL
       })
+
       const mainWindow = BrowserWindow.getAllWindows()[0]
       engine = new Engine(localHooks, device, (type, content) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('engine:log', { type, content })
         }
       })
-      
+
       engine.start().catch((err: any) => {
         console.error('[Main] Engine loop error:', err)
       })
-      
+
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error?.message || String(error) }
@@ -139,6 +161,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('engine:updateConfig', async (_event, config) => {
     if (localHooks) {
       localHooks.updateAIConfig(config)
+
+      // 更新 RAG 配置
+      if (config.ragEnabled !== undefined || config.ragDirectory !== undefined) {
+        await localHooks.updateRAGConfig({
+          enabled: config.ragEnabled,
+          directory: config.ragDirectory,
+          maxResults: config.ragMaxResults,
+          minScore: config.ragMinScore
+        })
+      }
+
       if (engine) {
         if (config.appType) {
           (engine as any).device?.setAppType(config.appType)
@@ -161,8 +194,20 @@ app.whenReady().then(async () => {
     return client.testConnection()
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  // ── RAG 相关 IPC ──
+  ipcMain.handle('rag:status', async () => {
+    if (!localHooks) {
+      return { enabled: false, initialized: false, directory: '', documentCount: 0, chunkCount: 0 }
+    }
+    return localHooks.getRAGStatus()
+  })
+
+  ipcMain.handle('rag:rebuild', async () => {
+    if (!localHooks) {
+      return { success: false, error: '引擎未初始化' }
+    }
+    return await localHooks.rebuildRAGIndex()
+  })
 
   ipcMain.handle('capture-screen', async () => {
     try {
@@ -191,20 +236,12 @@ app.whenReady().then(async () => {
   createWindow()
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

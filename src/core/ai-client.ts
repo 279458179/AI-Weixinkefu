@@ -19,14 +19,28 @@ const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 const REPLY_SYSTEM_PROMPT = `你是一个微信自动回复助手。你会收到一张微信/企业微信的聊天窗口截图。
 
 ## 你的任务
-分析截图中的聊天内容，生成合适的回复。
+分析截图中的聊天内容，生成一条合适的回复。
 
-## 规则
-1. 只输出回复文字，不要解释、不要添加多余内容
-2. **防自我循环**：仔细观察截图。聊天窗口中，右侧的气泡是"我"发送的。如果最后一条消息是右侧气泡（即"我"自己发送的），必须输出 [SKIP]
-3. 如果最新消息是系统消息、群公告、红包、转账等非对话消息，输出 [SKIP]
-4. 如果无法判断是否需要回复，输出 [SKIP]
-5. 回复要自然、口语化，像真人对话`
+## 绝对规则
+1. **只输出回复的纯文本内容**，一个字都不准多
+2. **禁止**输出任何标题、列表、编号、分隔线、emoji
+3. **禁止**输出分析、解释、建议、提示、总结
+4. **禁止**使用 markdown 格式（不用 #、-、*、>、--- 等）
+5. 回复要短，20字以内，像真人微信聊天一样自然口语化
+6. **防自我循环**：聊天窗口右侧的气泡是"我"发的。如果最新消息是右侧气泡，输出 [SKIP]
+7. 如果是系统消息、群公告、红包、转账、表情消息等非对话内容，输出 [SKIP]
+8. 如果无法判断是否需要回复，输出 [SKIP]
+
+## 正确的回复示例
+- "好的，没问题"
+- "明天下午三点开会，记得准备材料"
+- "收到，稍后发你"
+
+## 错误的回复示例（绝对禁止）
+- ❌ 带 markdown 格式、列表、编号的内容
+- ❌ "推荐回复：XXX"
+- ❌ "选项一：XXX 选项二：XXX"
+- ❌ 任何分析或解释`
 
 export class AIClient {
   private config: AIClientConfig
@@ -42,13 +56,15 @@ export class AIClient {
 
   /**
    * 发送截图给 AI，获取聊天回复
+   * @param screenshotBase64 截图 base64
+   * @param customSystemPrompt 自定义 system prompt（可选，用于注入 RAG 上下文）
    */
-  async getReply(screenshotBase64: string): Promise<string | null> {
+  async getReply(screenshotBase64: string, customSystemPrompt?: string): Promise<string | null> {
     const startTime = Date.now()
     try {
       console.log('[AIClient] getReply 开始...')
       const replyText = await this.callVision(
-        this.config.systemPrompt,
+        customSystemPrompt || this.config.systemPrompt,
         '请根据截图中微信聊天窗口的最新消息进行回复。',
         screenshotBase64
       )
@@ -69,6 +85,13 @@ export class AIClient {
   }
 
   /**
+   * 获取当前的 system prompt
+   */
+  getSystemPrompt(): string {
+    return this.config.systemPrompt
+  }
+
+  /**
    * VLM 视觉检测 — 发送截图 + prompt，获取 bbox/point 文本
    * 供 vision-utils.ts 调用
    */
@@ -84,9 +107,7 @@ export class AIClient {
    * 纯文本调用（不带图片）— 用于 testConnection 等
    */
   async callText(userMessage: string): Promise<string> {
-    const data = await this.callAPI([
-      { role: 'user', content: userMessage }
-    ])
+    const data = await this.callAPI([{ role: 'user', content: userMessage }])
     return this.extractText(data)
   }
 
@@ -141,15 +162,12 @@ export class AIClient {
 
   /**
    * 底层 HTTP 调用 — OpenAI 兼容 /chat/completions 端点
-   * thinking 字段是火山方舟对标 OpenAI Responses API 的扩展参数，
-   * 在非火山供应商上会被忽略，放在这里不影响兼容性
    */
   private async callAPI(messages: any[]): Promise<any> {
     const url = `${this.config.baseURL}/chat/completions`
     const TIMEOUT_MS = 30_000 // 30 秒超时
     const callStart = Date.now()
 
-    // 计算 payload 大小（粗略，不重复序列化）
     const bodyStr = JSON.stringify({
       model: this.config.model,
       messages,
@@ -203,7 +221,6 @@ export class AIClient {
 
   /**
    * 从 OpenAI 兼容 /chat/completions 返回值中提取文本
-   * 格式: { choices: [{ message: { role, content: string } }] }
    */
   private extractText(responseData: any): string {
     const content = responseData?.choices?.[0]?.message?.content

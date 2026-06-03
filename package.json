@@ -20,6 +20,7 @@
     "postinstall": "patch-package && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
+    "build:run": "node scripts/build-and-run.mjs",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux"
   },
@@ -34,9 +35,12 @@
     "electron-store": "^11.0.2",
     "get-windows": "^9.3.0",
     "jimp": "^1.6.1",
+    "mammoth": "^1.12.0",
     "node-window-manager": "^2.2.4",
+    "pdf-parse": "^2.4.5",
     "pixelmatch": "^7.1.0",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
