@@ -8,6 +8,7 @@ import { Engine } from '../core/engine'
 import { LocalHooks } from '../core/local-hooks'
 import { AIClient } from '../core/ai-client'
 import { RPADevice } from '../core/rpa-device'
+import { validateLicense, LicenseValidateResult } from '../core/license-service'
 
 const StoreClass = typeof Store === 'function' ? Store : ((Store as any).default as typeof Store)
 const settingsStore = new StoreClass({
@@ -23,7 +24,13 @@ const settingsStore = new StoreClass({
     ragEnabled: false,
     ragDirectory: '',
     ragMaxResults: 5,
-    ragMinScore: 0.1
+    ragMinScore: 0.1,
+    // License 配置
+    licenseKey: '',
+    licenseValid: false,
+    licenseExpiry: '',
+    licenseProduct: '',
+    licenseName: ''
   }
 })
 
@@ -207,6 +214,45 @@ app.whenReady().then(async () => {
       return { success: false, error: '引擎未初始化' }
     }
     return await localHooks.rebuildRAGIndex()
+  })
+
+  // ── License 验证 IPC ──
+  ipcMain.handle('license:validate', async (_event, licenseId: string) => {
+    const result: LicenseValidateResult = await validateLicense(licenseId)
+
+    if (result.valid && result.details) {
+      // 验证成功，保存 license 信息
+      settingsStore.set('licenseKey', licenseId)
+      settingsStore.set('licenseValid', true)
+      settingsStore.set('licenseExpiry', result.details.expiry || '')
+      settingsStore.set('licenseProduct', result.details.product || '')
+      settingsStore.set('licenseName', result.details.name || '')
+      console.log('[Main] License 验证成功，已保存')
+    } else {
+      // 验证失败，清除无效状态
+      settingsStore.set('licenseValid', false)
+    }
+
+    return result
+  })
+
+  ipcMain.handle('license:getStatus', async () => {
+    return {
+      licenseKey: settingsStore.get('licenseKey') || '',
+      licenseValid: settingsStore.get('licenseValid') || false,
+      licenseExpiry: settingsStore.get('licenseExpiry') || '',
+      licenseProduct: settingsStore.get('licenseProduct') || '',
+      licenseName: settingsStore.get('licenseName') || ''
+    }
+  })
+
+  ipcMain.handle('license:clear', async () => {
+    settingsStore.set('licenseKey', '')
+    settingsStore.set('licenseValid', false)
+    settingsStore.set('licenseExpiry', '')
+    settingsStore.set('licenseProduct', '')
+    settingsStore.set('licenseName', '')
+    return { success: true }
   })
 
   ipcMain.handle('capture-screen', async () => {

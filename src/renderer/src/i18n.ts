@@ -73,6 +73,25 @@ const translations = {
     'toast.engineStarted': '引擎已启动',
     'toast.engineStopped': '引擎已停止',
     'toast.startFailed': '启动失败',
+
+    // License
+    'license.title': '软件授权',
+    'license.id': 'License ID',
+    'license.id.placeholder': '输入您的授权码',
+    'license.id.hint': '请联系管理员获取授权码',
+    'license.validate': '验证授权',
+    'license.validating': '正在验证...',
+    'license.valid': '授权验证成功',
+    'license.invalid': '授权码无效',
+    'license.expired': '授权已过期',
+    'license.empty': '请输入授权码',
+    'license.error': '验证失败',
+    'license.expiry': '过期日期',
+    'license.checking': '正在检查授权状态...',
+    'license.required': '请先验证授权',
+    'license.about': '关于授权',
+    'license.about.text': '本软件需要授权才能使用。请联系管理员获取授权码。',
+    'license.about.contact': '联系方式: admin@example.com',
   },
   en: {
     'app.title': 'SightFlow Desktop',
@@ -139,6 +158,25 @@ const translations = {
     'toast.engineStarted': 'Engine started',
     'toast.engineStopped': 'Engine stopped',
     'toast.startFailed': 'Failed to start',
+
+    // License
+    'license.title': 'License Activation',
+    'license.id': 'License ID',
+    'license.id.placeholder': 'Enter your license key',
+    'license.id.hint': 'Contact admin to get a license key',
+    'license.validate': 'Validate License',
+    'license.validating': 'Validating...',
+    'license.valid': 'License validated successfully',
+    'license.invalid': 'Invalid license key',
+    'license.expired': 'License expired',
+    'license.empty': 'Please enter license key',
+    'license.error': 'Validation failed',
+    'license.expiry': 'Expiry Date',
+    'license.checking': 'Checking license status...',
+    'license.required': 'Please activate license first',
+    'license.about': 'About License',
+    'license.about.text': 'This software requires a license to use. Contact admin to get a license key.',
+    'license.about.contact': 'Contact: admin@example.com',
   }
 } as const
 

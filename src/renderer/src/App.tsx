@@ -11,7 +11,16 @@ interface LogEntry {
 }
 
 type EngineStatus = 'idle' | 'running' | 'error'
-type View = 'control' | 'settings'
+type View = 'control' | 'settings' | 'license'
+
+// License 状态
+interface LicenseStatus {
+  licenseKey: string
+  licenseValid: boolean
+  licenseExpiry: string
+  licenseProduct: string
+  licenseName: string
+}
 
 // ─── SVG Icons ───
 const PlayIcon = () => (
@@ -41,8 +50,46 @@ const BackIcon = () => (
 
 // ─── App ───
 function App() {
-  const [view, setView] = useState<View>('control')
+  const [view, setView] = useState<View>('license')
   const [status, setStatus] = useState<EngineStatus>('idle')
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
+  const [licenseLoading, setLicenseLoading] = useState(true)
+
+  // 启动时检查 license 状态
+  useEffect(() => {
+    window.electron?.invoke('license:getStatus').then((status: LicenseStatus) => {
+      setLicenseStatus(status)
+      setLicenseLoading(false)
+      // 如果已验证，直接进入控制面板
+      if (status.licenseValid) {
+        setView('control')
+      }
+    })
+  }, [])
+
+  // License 验证成功后切换到控制面板
+  const handleLicenseValidated = useCallback((status: LicenseStatus) => {
+    setLicenseStatus(status)
+    setView('control')
+  }, [])
+
+  // 如果正在加载 license 状态，显示加载界面
+  if (licenseLoading) {
+    return (
+      <div className="app">
+        <header className="app-header">
+          <img src={logoUrl} alt="SightFlow" className="app-logo" />
+        </header>
+        <div className="app-content">
+          <div className="fade-in" style={{ textAlign: 'center', padding: 40 }}>
+            <div className="status-indicator idle">
+              <span className="status-text">{t('license.checking')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app">
@@ -55,12 +102,14 @@ function App() {
           >
             <BackIcon />
           </button>
-        ) : null}
+        ) : view === 'license' ? null : null}
         <img src={logoUrl} alt="SightFlow" className="app-logo" />
       </header>
 
       <div className="app-content">
-        {view === 'control' ? (
+        {view === 'license' ? (
+          <LicensePanel onValidated={handleLicenseValidated} />
+        ) : view === 'control' ? (
           <ControlPanel status={status} setStatus={setStatus} />
         ) : (
           <SettingsPanel />
@@ -72,10 +121,130 @@ function App() {
           status={status}
           setStatus={setStatus}
           onSettings={() => setView('settings')}
+          licenseValid={licenseStatus?.licenseValid || false}
         />
       )}
 
       <Toast />
+    </div>
+  )
+}
+
+// ─── License Panel ───
+function LicensePanel({ onValidated }: { onValidated: (status: LicenseStatus) => void }) {
+  const [licenseId, setLicenseId] = useState('')
+  const [validating, setValidating] = useState(false)
+  const [error, setError] = useState('')
+  const [expired, setExpired] = useState(false)
+  const [expiredDate, setExpiredDate] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  // 加载已保存的 license ID
+  useEffect(() => {
+    window.electron?.invoke('license:getStatus').then((status: LicenseStatus) => {
+      if (status.licenseKey) {
+        setLicenseId(status.licenseKey)
+      }
+      setLoaded(true)
+    })
+  }, [])
+
+  const handleValidate = useCallback(async () => {
+    if (!licenseId.trim()) {
+      setError(t('license.empty'))
+      return
+    }
+
+    setValidating(true)
+    setError('')
+    setExpired(false)
+    setExpiredDate('')
+
+    try {
+      const result = await window.electron?.invoke('license:validate', licenseId.trim())
+
+      if (result?.valid) {
+        // 验证成功
+        showToast(t('license.valid'), 'success')
+        onValidated({
+          licenseKey: licenseId.trim(),
+          licenseValid: true,
+          licenseExpiry: result.details?.expiry || '',
+          licenseProduct: result.details?.product || '',
+          licenseName: result.details?.name || ''
+        })
+      } else if (result?.expired) {
+        // 已过期
+        setExpired(true)
+        setExpiredDate(result.details?.expiry || '')
+        setError(t('license.expired'))
+        showToast(t('license.expired'), 'error')
+      } else {
+        // 验证失败
+        setError(result?.error || t('license.invalid'))
+        showToast(result?.error || t('license.invalid'), 'error')
+      }
+    } catch (e: any) {
+      setError(e?.message || t('license.error'))
+      showToast(e?.message || t('license.error'), 'error')
+    } finally {
+      setValidating(false)
+    }
+  }, [licenseId, onValidated])
+
+  if (!loaded) {
+    return (
+      <div className="fade-in" style={{ textAlign: 'center', padding: 40 }}>
+        <div className="spinner" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="slide-up">
+      <div className="card">
+        <div className="card-title">{t('license.title')}</div>
+
+        <div className="form-group">
+          <label className="form-label">{t('license.id')}</label>
+          <input
+            className="form-input"
+            value={licenseId}
+            onChange={(e) => setLicenseId(e.target.value)}
+            placeholder={t('license.id.placeholder')}
+            disabled={validating}
+          />
+          <div className="form-hint">{t('license.id.hint')}</div>
+        </div>
+
+        {error && (
+          <div className={`license-error ${expired ? 'expired' : 'invalid'}`}>
+            {error}
+            {expired && expiredDate && (
+              <span className="license-error-date">
+                {t('license.expiry')}: {expiredDate}
+              </span>
+            )}
+          </div>
+        )}
+
+        <button
+          className="btn btn-primary"
+          onClick={handleValidate}
+          disabled={validating || !licenseId.trim()}
+          style={{ width: '100%' }}
+        >
+          {validating ? t('license.validating') : t('license.validate')}
+        </button>
+      </div>
+
+      <div className="card">
+        <div className="card-title">{t('license.about')}</div>
+        <div className="license-about">
+          <p>{t('license.about.text')}</p>
+          <p className="license-about-contact">{t('license.about.contact')}</p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -153,13 +322,22 @@ function ControlPanel({
 function BottomBar({
   status,
   setStatus,
-  onSettings
+  onSettings,
+  licenseValid
 }: {
   status: EngineStatus
   setStatus: (s: EngineStatus) => void
   onSettings: () => void
+  licenseValid: boolean
 }) {
   const handleStart = useCallback(async () => {
+    // 1. 先检查 License
+    if (!licenseValid) {
+      showToast(t('license.required'), 'error')
+      return
+    }
+
+    // 2. 检查 apiKey
     const settings = await window.electron?.invoke('settings:getAll')
     const apiKey = settings?.apiKey || ''
     if (!apiKey) {
@@ -187,7 +365,7 @@ function BottomBar({
       setStatus('error')
       showToast(result?.error || t('toast.startFailed'), 'error')
     }
-  }, [setStatus])
+  }, [setStatus, licenseValid])
 
   const handleStop = useCallback(async () => {
     await window.electron?.invoke('engine:stop')

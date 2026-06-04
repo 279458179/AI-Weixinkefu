@@ -57,14 +57,18 @@ export function clearLayoutCache(appType: AppType): void {
 
 /**
  * 从 VLM 返回文本中解析所有 <bbox> 标签
- * 支持格式:
+ * 支持多种格式:
  *   - <bbox>x1,y1,x2,y2</bbox>  (逗号分隔)
  *   - <bbox>x1 y1 x2 y2</bbox>  (空格分隔)
+ *   - <box>[x1,y1,x2,y2]</box>  (qwen 格式)
+ *   - [x1,y1,x2,y2]  (纯 JSON 数组)
  * 坐标为归一化 0-1000
  */
 export function parseBBoxes(text: string): BBox[] {
   if (!text) return []
   const bboxes: BBox[] = []
+
+  console.log('[parseBBoxes] 原始文本:', text.slice(0, 500))
 
   // 1. 先尝试逗号分隔格式（标准格式）
   let regex = /<bbox>\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*<\/bbox>/gi
@@ -80,6 +84,8 @@ export function parseBBoxes(text: string): BBox[] {
     }
   }
 
+  console.log('[parseBBoxes] 格式1找到:', bboxes.length)
+
   // 2. 如果没有找到逗号分隔的格式，尝试空格分隔
   if (bboxes.length === 0) {
     regex = /<bbox>\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*<\/bbox>/gi
@@ -93,6 +99,7 @@ export function parseBBoxes(text: string): BBox[] {
         bboxes.push([Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)])
       }
     }
+    console.log('[parseBBoxes] 格式2找到:', bboxes.length)
   }
 
   // 3. 支持 <box>[x1,y1,x2,y2]</box> 格式（qwen 等模型返回格式）
@@ -108,8 +115,29 @@ export function parseBBoxes(text: string): BBox[] {
         bboxes.push([Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)])
       }
     }
+    console.log('[parseBBoxes] 格式3找到:', bboxes.length)
   }
 
+  // 4. 支持纯 JSON 数组格式 [x1,y1,x2,y2]（某些模型直接输出）
+  if (bboxes.length === 0) {
+    regex = /\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\]/g
+
+    while ((match = regex.exec(text)) !== null) {
+      const x1 = Number(match[1])
+      const y1 = Number(match[2])
+      const x2 = Number(match[3])
+      const y2 = Number(match[4])
+      // 过滤掉明显不是 bbox 的数值
+      if ([x1, y1, x2, y2].every((v) => Number.isFinite(v) && v >= 0 && v <= 1000)) {
+        if (x2 > x1 && y2 > y1) {
+          bboxes.push([Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)])
+        }
+      }
+    }
+    console.log('[parseBBoxes] 格式4找到:', bboxes.length)
+  }
+
+  console.log('[parseBBoxes] 最终找到:', bboxes.length)
   return bboxes
 }
 
