@@ -72,7 +72,7 @@ export class AIClient {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
       console.log(`[AIClient] getReply 完成 (${elapsed}s):`, replyText?.slice(0, 100))
 
-      if (!replyText || replyText.trim() === '[SKIP]') {
+      if (!replyText || replyText.includes('[SKIP]')) {
         return null
       }
 

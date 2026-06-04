@@ -258,10 +258,11 @@ export class Engine {
     try {
       switch (action.type) {
         case 'text':
-          this.emitLog('reply', `[回复] ${action.content}`)
+          this.emitLog('reply', `[回复] ${action.content.slice(0, 50)}...`)
+          this.emitLog('thinking', '准备发送消息...')
           try {
             await this.device.sendMessage(action.content)
-            this.emitLog('skip', '发送成功')
+            this.emitLog('reply', '✓ 消息已发送')
           } catch (sendErr: any) {
             this.emitLog('error', `发送失败: ${sendErr.message || String(sendErr)}`)
           }
