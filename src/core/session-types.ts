@@ -5,6 +5,10 @@ export interface ProviderInput {
   appType: AppType
   currentContact?: string
   ocrText?: string
+  knowledgeBase?: {
+    enabled: boolean
+    content: string
+  }
 }
 
 export type ProviderEvent =

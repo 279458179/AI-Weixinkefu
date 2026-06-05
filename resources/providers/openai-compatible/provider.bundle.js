@@ -45,13 +45,32 @@ export function createProvider(context) {
 
       yield { type: 'thinking', content: '正在分析聊天内容...' }
 
+      // 构建系统提示词，如果有知识库则附加
+      let systemPrompt = providerConfig.systemPrompt || DEFAULT_PROMPT
+      if (input.knowledgeBase?.enabled && input.knowledgeBase?.content) {
+        systemPrompt = `${systemPrompt}
+
+## 知识库话术参考
+以下是知识库中的话术内容，请根据用户问题关键词匹配合适的回复风格：
+
+${input.knowledgeBase.content}
+
+**重要提示**：
+- 如果用户问题与知识库内容关键词匹配，请参照知识库话术风格回复
+- 如果没有匹配的知识库内容，请按正常逻辑回复
+- 知识库仅供参考，不要直接复制粘贴，要自然融入对话`
+        if (context && context.host && typeof context.host.log === 'function') {
+          context.host.log('已加载知识库，将参照话术回复')
+        }
+      }
+
       try {
         const reply = await requestReply({
           screenshot: screenshot,
           apiKey,
           baseUrl: providerConfig.baseUrl || DEFAULT_BASE_URL,
           model: providerConfig.model || DEFAULT_MODEL,
-          systemPrompt: providerConfig.systemPrompt || DEFAULT_PROMPT
+          systemPrompt
         })
 
         if (!reply || reply.trim() === '[SKIP]') {

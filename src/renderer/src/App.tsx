@@ -10,7 +10,7 @@ interface LogEntry {
 }
 
 type EngineStatus = 'idle' | 'running' | 'error'
-type SettingsSection = 'base' | 'agent'
+type SettingsSection = 'base' | 'agent' | 'knowledge'
 type AppType = 'wechat' | 'wework' | 'dingtalk' | 'lark' | 'slack' | 'telegram' | 'generic'
 
 type CaptureStrategy = 'auto' | 'vlm' | 'box-select'
@@ -133,8 +133,19 @@ interface AppSettings {
     installed: InstalledProviderInfo | null
     config: Record<string, any>
   }
+  knowledgeBase: {
+    enabled: boolean
+    path: string
+  }
   defaultCaptureStrategy: CaptureStrategy
   capture: Partial<Record<AppType, PerAppCapture>>
+}
+
+interface KnowledgeBaseFile {
+  name: string
+  path: string
+  size: number
+  modifiedAt: string
 }
 
 const BUILTIN_PROVIDER_CATALOG: ProviderCatalogItem[] = [
@@ -659,10 +670,16 @@ function SettingsWindow(): React.JSX.Element {
         >
           智能体
         </button>
+        <button
+          className={`settings-nav-item ${section === 'knowledge' ? 'active' : ''}`}
+          onClick={() => setSection('knowledge')}
+        >
+          知识库
+        </button>
       </aside>
 
       <main className="settings-main">
-        {section === 'base' ? <SettingsPanel /> : <AgentPanel />}
+        {section === 'base' ? <SettingsPanel /> : section === 'agent' ? <AgentPanel /> : <KnowledgeBasePanel />}
       </main>
     </div>
   )
@@ -1098,6 +1115,165 @@ function ProviderFieldInput({
         />
       )}
       {field.hint ? <div className="form-hint">{field.hint}</div> : null}
+    </div>
+  )
+}
+
+function KnowledgeBasePanel(): React.JSX.Element {
+  const [enabled, setEnabled] = useState(false)
+  const [kbPath, setKbPath] = useState('')
+  const [files, setFiles] = useState<KnowledgeBaseFile[]>([])
+  const [loading, setLoading] = useState(false)
+  const [scanning, setScanning] = useState(false)
+
+  useEffect(() => {
+    const load = async () => {
+      const settings = (await window.electron?.invoke('settings:getAll')) as AppSettings | undefined
+      if (settings?.knowledgeBase) {
+        setEnabled(settings.knowledgeBase.enabled)
+        setKbPath(settings.knowledgeBase.path)
+        if (settings.knowledgeBase.path) {
+          await scanFiles(settings.knowledgeBase.path)
+        }
+      }
+    }
+    void load()
+  }, [])
+
+  const scanFiles = async (path: string) => {
+    if (!path) return
+    setScanning(true)
+    try {
+      const result = (await window.electron?.invoke('knowledgeBase:scanFiles', path)) as {
+        success: boolean
+        files: KnowledgeBaseFile[]
+        error?: string
+      }
+      if (result.success) {
+        setFiles(result.files)
+      } else {
+        showToast(`扫描失败: ${result.error || ''}`, 'error')
+        setFiles([])
+      }
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const handleSelectFolder = async () => {
+    const result = (await window.electron?.invoke('knowledgeBase:selectFolder')) as {
+      success: boolean
+      path?: string
+    }
+    if (result.success && result.path) {
+      setKbPath(result.path)
+      await scanFiles(result.path)
+    }
+  }
+
+  const handleToggle = async (newEnabled: boolean) => {
+    setEnabled(newEnabled)
+    if (newEnabled && !kbPath) {
+      showToast('请先选择知识库目录', 'error')
+      setEnabled(false)
+      return
+    }
+    await saveSettings(newEnabled, kbPath)
+  }
+
+  const handleSave = async () => {
+    if (enabled && !kbPath) {
+      showToast('请先选择知识库目录', 'error')
+      return
+    }
+    setLoading(true)
+    try {
+      await saveSettings(enabled, kbPath)
+      showToast('知识库配置已保存', 'success')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveSettings = async (newEnabled: boolean, newPath: string) => {
+    await window.electron?.invoke('settings:set', {
+      knowledgeBase: {
+        enabled: newEnabled,
+        path: newPath
+      }
+    })
+  }
+
+  return (
+    <div className="settings-page slide-up">
+      <div className="settings-page-header">
+        <div>
+          <h1>知识库</h1>
+          <p>配置本地知识库，智能体回复时参照知识库话术。支持 Markdown 文件。</p>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">知识库配置</div>
+
+        <div className="form-group">
+          <label className="form-label">
+            启用知识库
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => handleToggle(e.target.checked)}
+              style={{ marginLeft: 10 }}
+            />
+          </label>
+          <div className="form-hint">启用后，智能体回复时会参照知识库中的话术</div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">知识库目录</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="form-input"
+              type="text"
+              value={kbPath}
+              onChange={(e) => setKbPath(e.target.value)}
+              placeholder="选择本地目录..."
+              readOnly
+              style={{ flex: 1 }}
+            />
+            <button className="btn btn-secondary" onClick={handleSelectFolder} disabled={scanning}>
+              {scanning ? '扫描中...' : '选择目录'}
+            </button>
+          </div>
+          <div className="form-hint">目录内的 .md 文件将作为知识库内容</div>
+        </div>
+
+        {kbPath && files.length > 0 && (
+          <div className="form-group">
+            <label className="form-label">已识别文件 ({files.length})</label>
+            <div className="kb-file-list">
+              {files.map((file, i) => (
+                <div key={i} className="kb-file-item">
+                  <span className="kb-file-name">{file.name}</span>
+                  <span className="kb-file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {kbPath && files.length === 0 && !scanning && (
+          <div className="form-group">
+            <div className="kb-empty">目录中没有 .md 文件</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
+            {loading ? '保存中...' : '保存配置'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

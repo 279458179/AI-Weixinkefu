@@ -1,6 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain, desktopCapturer } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, desktopCapturer, dialog } from 'electron'
 import { join } from 'path'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { checkAndRequestPermissions } from './permission'
@@ -59,6 +60,11 @@ interface AppSettings {
     manifestUrl: string
     installed: InstalledProviderInfo | null
     config: Record<string, any>
+  }
+  // 知识库配置
+  knowledgeBase: {
+    enabled: boolean
+    path: string  // 本地知识库目录路径
   }
   // 默认抓取策略（仅当 appType 没有 per-app 覆盖时生效）
   defaultCaptureStrategy: CaptureStrategy
@@ -127,6 +133,10 @@ const settingsStore = new StoreClass({
       manifestUrl: '',
       installed: null,
       config: {}
+    },
+    knowledgeBase: {
+      enabled: false,
+      path: ''
     },
     defaultCaptureStrategy: 'auto',
     capture: {}
@@ -634,6 +644,42 @@ app.whenReady().then(async () => {
     return await runVlmParallelTest(apiKey, 'wechat')
   })
 
+  // ── 知识库 IPC ──
+  ipcMain.handle('knowledgeBase:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: '选择知识库目录'
+    })
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { success: false }
+    }
+    return { success: true, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle('knowledgeBase:scanFiles', async (_event, kbPath: string) => {
+    if (!kbPath || !existsSync(kbPath)) {
+      return { success: false, error: '目录不存在', files: [] }
+    }
+    try {
+      const files = await scanKnowledgeBaseFiles(kbPath)
+      return { success: true, files }
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error), files: [] }
+    }
+  })
+
+  ipcMain.handle('knowledgeBase:loadContent', async (_event, kbPath: string) => {
+    if (!kbPath || !existsSync(kbPath)) {
+      return { success: false, error: '目录不存在', content: '' }
+    }
+    try {
+      const content = await loadKnowledgeBaseContent(kbPath)
+      return { success: true, content }
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error), content: '' }
+    }
+  })
+
   // ── Skill HTTP Server（OpenClaw 远程启动 / 暂停接入点） ──
   startSkillServer(skillEngineController)
 
@@ -763,7 +809,10 @@ async function startEngineCore(rawConfig?: any): Promise<SkillStartResult> {
       channel,
       provider,
       initialState: createInitialGenericChannelState(),
-      onLog: log
+      onLog: log,
+      knowledgeBase: settings.knowledgeBase.enabled && settings.knowledgeBase.path
+        ? { enabled: true, path: settings.knowledgeBase.path }
+        : undefined
     })
 
     runtime.startSession().catch((err: any) => {
@@ -1003,9 +1052,55 @@ function normalizeSettings(raw: any): AppSettings {
       installed: raw?.chatProvider?.installed || null,
       config: rawProviderConfig
     },
+    knowledgeBase: {
+      enabled: raw?.knowledgeBase?.enabled === true,
+      path: typeof raw?.knowledgeBase?.path === 'string' ? raw.knowledgeBase.path : ''
+    },
     defaultCaptureStrategy: coerceStrategy(raw?.defaultCaptureStrategy, 'auto'),
     capture: normalizeCapture(raw?.capture)
   }
+}
+
+// ── 知识库辅助函数 ──
+
+interface KnowledgeBaseFile {
+  name: string
+  path: string
+  size: number
+  modifiedAt: Date
+}
+
+async function scanKnowledgeBaseFiles(kbPath: string): Promise<KnowledgeBaseFile[]> {
+  const files: KnowledgeBaseFile[] = []
+  const entries = await readdir(kbPath, { withFileTypes: true })
+
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      const filePath = join(kbPath, entry.name)
+      const stats = await stat(filePath)
+      files.push({
+        name: entry.name,
+        path: filePath,
+        size: stats.size,
+        modifiedAt: stats.mtime
+      })
+    }
+  }
+
+  return files.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function loadKnowledgeBaseContent(kbPath: string): Promise<string> {
+  const files = await scanKnowledgeBaseFiles(kbPath)
+  const contents: string[] = []
+
+  for (const file of files) {
+    const content = await readFile(file.path, 'utf-8')
+    // 添加文件名作为分隔标识
+    contents.push(`--- ${file.name} ---\n${content}\n`)
+  }
+
+  return contents.join('\n')
 }
 
 function withSchemaDefaults(

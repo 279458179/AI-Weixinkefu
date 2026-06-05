@@ -8,11 +8,17 @@ import {
 } from './session-types'
 import { AppType } from './rpa/types'
 
+interface KnowledgeBaseConfig {
+  enabled: boolean
+  path: string
+}
+
 interface RuntimeHostOptions<TState> {
   appType: AppType
   channel: ChannelSession<TState>
   provider: ProviderAdapter
   initialState: TState
+  knowledgeBase?: KnowledgeBaseConfig
   onLog?: (type: 'thinking' | 'reply' | 'skip' | 'error', content: string) => void
 }
 
@@ -23,6 +29,7 @@ export class RuntimeHost<TState> {
   private readonly queue: SessionEvent[] = []
   private readonly timers = new Set<NodeJS.Timeout>()
   private readonly context: ChannelContext<TState>
+  private knowledgeBaseContent: string = ''
 
   constructor(private readonly options: RuntimeHostOptions<TState>) {
     this.context = {
@@ -37,6 +44,35 @@ export class RuntimeHost<TState> {
 
     this.running = true
     this.stopping = false
+
+    // 加载知识库内容
+    if (this.options.knowledgeBase?.enabled && this.options.knowledgeBase.path) {
+      try {
+        const { readFile, readdir } = await import('node:fs/promises')
+        const { join } = await import('path')
+        const { existsSync } = await import('node:fs')
+
+        const kbPath = this.options.knowledgeBase.path
+        if (existsSync(kbPath)) {
+          const entries = await readdir(kbPath, { withFileTypes: true })
+          const contents: string[] = []
+
+          for (const entry of entries) {
+            if (entry.isFile() && entry.name.endsWith('.md')) {
+              const filePath = join(kbPath, entry.name)
+              const content = await readFile(filePath, 'utf-8')
+              contents.push(`--- ${entry.name} ---\n${content}\n`)
+            }
+          }
+
+          this.knowledgeBaseContent = contents.join('\n')
+          this.log('thinking', `已加载知识库 (${contents.length} 个文件)`)
+        }
+      } catch (error: any) {
+        this.log('error', `知识库加载失败: ${error?.message || String(error)}`)
+      }
+    }
+
     this.log('reply', '引擎已启动')
 
     try {
@@ -81,7 +117,16 @@ export class RuntimeHost<TState> {
     return {
       enqueue: (event) => this.enqueue(event),
       schedule: (event, delayMs) => this.schedule(event, delayMs),
-      runProvider: (input: ProviderInput) => this.options.provider.run(input),
+      runProvider: (input: ProviderInput) => {
+        // 注入知识库内容
+        if (this.options.knowledgeBase?.enabled && this.knowledgeBaseContent) {
+          input.knowledgeBase = {
+            enabled: true,
+            content: this.knowledgeBaseContent
+          }
+        }
+        return this.options.provider.run(input)
+      },
       log: (type, content) => this.log(type, content),
       isRunning: () => this.running,
       stopSession: async (reason?: string) => this.stopSession(reason)
