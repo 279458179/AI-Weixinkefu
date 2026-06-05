@@ -1,0 +1,34 @@
+{
+  "apiVersion": 1,
+  "id": "openai-compatible",
+  "name": "自定义 LLM",
+  "version": "1.0.0",
+  "entry": "provider.bundle.js",
+  "moduleType": "module",
+  "capabilities": ["chat"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "title": "API 地址",
+        "default": "https://api.openai.com/v1"
+      },
+      "apiKey": {
+        "type": "password",
+        "title": "接口密钥"
+      },
+      "model": {
+        "type": "string",
+        "title": "模型名称",
+        "default": "gpt-4o"
+      },
+      "systemPrompt": {
+        "type": "string",
+        "title": "系统提示词",
+        "default": ""
+      }
+    },
+    "required": ["apiKey"]
+  }
+}
