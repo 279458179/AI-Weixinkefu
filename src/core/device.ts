@@ -87,4 +87,39 @@ export interface DesktopDevice {
 
   /** 点击指定坐标 */
   clickAt(x: number, y: number): Promise<void>
+
+  // ── 好友请求检测与处理 ──
+
+  /**
+   * 检测是否有好友请求通知
+   * 检测"新的朋友"入口是否有红点
+   */
+  hasFriendRequest(): Promise<{
+    hasRequest: boolean
+    newFriendsArea?: { bbox: BBox; coordinates: [number, number] }
+  }>
+
+  /**
+   * 点击"新的朋友"入口
+   */
+  clickNewFriends(coordinates: [number, number]): Promise<void>
+
+  /**
+   * 检测好友请求列表中的第一个请求项和"接受"按钮
+   */
+  detectFriendRequestItem(): Promise<{
+    success: boolean
+    requestItem?: { coordinates: [number, number] }
+    acceptButton?: { coordinates: [number, number] }
+  }>
+
+  /**
+   * 点击好友请求项
+   */
+  clickFriendRequestItem(coordinates: [number, number]): Promise<void>
+
+  /**
+   * 点击"接受"按钮
+   */
+  clickAcceptFriend(coordinates: [number, number]): Promise<void>
 }

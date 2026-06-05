@@ -9,11 +9,19 @@ import { AIClient } from './ai-client'
 import { AppType } from './rpa/types'
 import { BBox } from './rpa/vision-utils'
 import { takeWeChatScreenshot } from './rpa/screenshot-utils'
-import { sendReplyAction, activeUnreadByClickAction, clickUnreadContactAction } from './rpa/input-utils'
+import {
+  sendReplyAction,
+  activeUnreadByClickAction,
+  clickUnreadContactAction,
+  clickNewFriendsAction,
+  clickFriendRequestItemAction,
+  clickAcceptFriendAction
+} from './rpa/input-utils'
 import {
   hasUnreadMessage as hasUnreadMessageDetect,
   isChatContactUnread as isChatContactUnreadDetect
 } from './rpa/has-unread'
+import { calculateRedDotPercentage, captureWechatWindow } from './rpa/screenshot-utils'
 import {
   setChatBaseline as setChatBaselineFn,
   checkChatAreaDiff,
@@ -24,7 +32,10 @@ import {
   detectWechatLayout,
   getInputAreaFromCache,
   getLayoutCache,
-  setLayoutCache
+  setLayoutCache,
+  detectNewFriendsArea,
+  detectFriendRequestDetail,
+  bboxToCropBounds
 } from './rpa/vision-utils'
 import { getWechatWindowInfo } from './rpa/window-utils'
 
@@ -244,5 +255,115 @@ export class RPADevice implements DesktopDevice {
 
   async clickAt(x: number, y: number): Promise<void> {
     await clickUnreadContactAction([x, y])
+  }
+
+  // ── 好友请求检测与处理 ──
+
+  /**
+   * 检测是否有好友请求通知
+   * 检测"新的朋友"入口是否有红点
+   */
+  async hasFriendRequest(): Promise<{
+    hasRequest: boolean
+    newFriendsArea?: { bbox: BBox; coordinates: [number, number] }
+  }> {
+    if (!this.aiClient) {
+      console.warn('[RPADevice] aiClient 未初始化')
+      return { hasRequest: false }
+    }
+
+    try {
+      console.log('[RPADevice] 检测好友请求通知...')
+
+      // 1. 检测"新的朋友"入口区域
+      const detectResult = await detectNewFriendsArea(this.aiClient, this.appType)
+      if (!detectResult.success || !detectResult.newFriendsArea) {
+        console.log('[RPADevice] 未检测到新的朋友入口')
+        return { hasRequest: false }
+      }
+
+      const newFriendsArea = detectResult.newFriendsArea
+
+      // 2. 获取窗口信息用于局部截图
+      const windowInfo = await getWechatWindowInfo(this.appType)
+      if (!windowInfo?.bounds) {
+        console.warn('[RPADevice] 获取窗口信息失败')
+        return { hasRequest: false, newFriendsArea }
+      }
+
+      // 3. 局部截图检测红点
+      const cropBounds = bboxToCropBounds(newFriendsArea.bbox, windowInfo.bounds)
+      const screenshotResult = await captureWechatWindow(this.appType, cropBounds)
+
+      if (!screenshotResult.success || !screenshotResult.screenshotBase64) {
+        console.warn('[RPADevice] 局部截图失败')
+        return { hasRequest: false, newFriendsArea }
+      }
+
+      // 4. 红点像素扫描（右上角）
+      const percentage = await calculateRedDotPercentage(
+        screenshotResult.screenshotBase64,
+        true
+      )
+
+      if (percentage === null || percentage < 1) {
+        console.log('[RPADevice] 新的朋友入口无红点:', percentage)
+        return { hasRequest: false, newFriendsArea }
+      }
+
+      console.log('[RPADevice] 检测到好友请求红点:', percentage.toFixed(2) + '%')
+      return { hasRequest: true, newFriendsArea }
+    } catch (error: any) {
+      console.error('[RPADevice] hasFriendRequest 失败:', error)
+      return { hasRequest: false }
+    }
+  }
+
+  /**
+   * 点击"新的朋友"入口
+   */
+  async clickNewFriends(coordinates: [number, number]): Promise<void> {
+    await clickNewFriendsAction(coordinates)
+  }
+
+  /**
+   * 检测好友请求列表中的第一个请求项和"接受"按钮
+   */
+  async detectFriendRequestItem(): Promise<{
+    success: boolean
+    requestItem?: { coordinates: [number, number] }
+    acceptButton?: { coordinates: [number, number] }
+  }> {
+    if (!this.aiClient) {
+      console.warn('[RPADevice] aiClient 未初始化')
+      return { success: false }
+    }
+
+    const result = await detectFriendRequestDetail(this.aiClient, this.appType)
+
+    if (!result.success) {
+      console.error('[RPADevice] detectFriendRequestItem 失败:', result.error)
+      return { success: false }
+    }
+
+    return {
+      success: true,
+      requestItem: result.requestItem ? { coordinates: result.requestItem.coordinates } : undefined,
+      acceptButton: result.acceptButton ? { coordinates: result.acceptButton.coordinates } : undefined
+    }
+  }
+
+  /**
+   * 点击好友请求项
+   */
+  async clickFriendRequestItem(coordinates: [number, number]): Promise<void> {
+    await clickFriendRequestItemAction(coordinates)
+  }
+
+  /**
+   * 点击"接受"按钮
+   */
+  async clickAcceptFriend(coordinates: [number, number]): Promise<void> {
+    await clickAcceptFriendAction(coordinates)
   }
 }

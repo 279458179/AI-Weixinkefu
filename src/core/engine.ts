@@ -108,24 +108,22 @@ export class Engine {
     }
   }
 
-  // ── Step 5: 双通道检测（红点 + chatMainArea diff） ──
+  // ── Step 5: 三通道检测（好友请求 + 红点 + chatMainArea diff） ──
 
   /**
-   * 等待下一条消息（红点检测 + chatMainArea diff 双通道并行）
+   * 等待下一条消息（好友请求 + 红点检测 + chatMainArea diff 三通道并行）
    *
+   * 通道 3 — 好友请求检测：检测"新的朋友"入口是否有红点
    * 通道 1 — 红点检测：检测左侧列表的未读角标（其他联系人发消息）
    * 通道 2 — chatMainArea diff：检测当前对话窗口是否有变化（当前联系人发消息）
    *
-   * 为什么需要双通道：
-   * - 红点检测只能发现 **其他联系人** 的新消息（左侧列表出现红点）
-   * - 但 **当前打开的对话** 收到新消息时，左侧不会出现红点
-   * - chatMainArea diff 弥补了这个盲点
-   *
    * 流程：
-   * 1. 每轮轮询先检查 chatMainArea diff
-   * 2. diff 有变化 → 直接 return（当前对话有新消息，回到 processCurrentChat）
-   * 3. diff 无变化 → 检查红点
-   * 4. 红点有未读 → 视觉点击切换联系人 → return
+   * 1. 每轮轮询先检查好友请求（通道 3）
+   * 2. 有好友请求 → 处理好友请求 → return
+   * 3. 检查 chatMainArea diff（通道 2）
+   * 4. diff 有变化 → 直接 return（当前对话有新消息）
+   * 5. diff 无变化 → 检查红点（通道 1）
+   * 6. 红点有未读 → 视觉点击切换联系人 → return
    */
   private async waitForNextUnread() {
     while (this.running) {
@@ -133,6 +131,15 @@ export class Engine {
       await this.sleep(3000 + Math.random() * 2000)
 
       if (!this.running) break
+
+      // ── 通道 3: 好友请求检测 ──
+      const friendResult = await this.device.hasFriendRequest()
+      if (friendResult.hasRequest) {
+        this.emitLog('thinking', '检测到好友请求通知')
+        await this.handleFriendRequest(friendResult.newFriendsArea?.coordinates)
+        // 处理完好友请求后继续等待消息
+        continue
+      }
 
       // ── 通道 2: chatMainArea diff 检测 ──
       const diffResult = await this.device.hasChatAreaChanged()
@@ -249,6 +256,70 @@ export class Engine {
 
       // 成功切换 → 回到主循环 processCurrentChat
       return
+    }
+  }
+
+  // ── 好友请求处理 ──
+
+  /**
+   * 处理好友请求
+   *
+   * 流程：
+   * 1. 点击"新的朋友"入口
+   * 2. 等待列表加载
+   * 3. VLM 检测第一个请求项 + 接受按钮
+   * 4. 点击请求项（展开详情）
+   * 5. 点击"接受"按钮
+   * 6. 等待处理完成
+   */
+  private async handleFriendRequest(coordinates?: [number, number]) {
+    if (!coordinates) {
+      this.emitLog('error', '未获取到"新的朋友"坐标，无法处理好友请求')
+      return
+    }
+
+    try {
+      // Step 1: 点击"新的朋友"入口
+      this.emitLog('thinking', `点击"新的朋友" (${coordinates[0]}, ${coordinates[1]})`)
+      await this.device.clickNewFriends(coordinates)
+      await this.sleep(800 + Math.random() * 400) // 等待列表加载
+
+      // Step 2: VLM 检测第一个请求项 + 接受按钮
+      this.emitLog('thinking', '检测好友请求列表...')
+      const detectResult = await this.device.detectFriendRequestItem()
+
+      if (!detectResult.success) {
+        this.emitLog('error', '检测好友请求项失败')
+        return
+      }
+
+      const requestItemCoords = detectResult.requestItem?.coordinates
+      const acceptButtonCoords = detectResult.acceptButton?.coordinates
+
+      if (!requestItemCoords) {
+        this.emitLog('skip', '未检测到好友请求项')
+        return
+      }
+
+      // Step 3: 点击请求项（展开详情）
+      this.emitLog('thinking', `点击好友请求项 (${requestItemCoords[0]}, ${requestItemCoords[1]})`)
+      await this.device.clickFriendRequestItem(requestItemCoords)
+      await this.sleep(400 + Math.random() * 200)
+
+      // Step 4: 点击"接受"按钮
+      if (!acceptButtonCoords) {
+        this.emitLog('error', '未检测到"接受"按钮')
+        return
+      }
+
+      this.emitLog('reply', `点击"接受"按钮 (${acceptButtonCoords[0]}, ${acceptButtonCoords[1]})`)
+      await this.device.clickAcceptFriend(acceptButtonCoords)
+      await this.sleep(500 + Math.random() * 300)
+
+      this.emitLog('reply', '好友请求已接受 ✓')
+    } catch (error: any) {
+      this.emitLog('error', `处理好友请求失败: ${error.message || String(error)}`)
+      this.hooks.onError?.(error, 'handle_friend_request')
     }
   }
 

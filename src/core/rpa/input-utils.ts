@@ -248,3 +248,76 @@ export async function clickUnreadContactAction(
   console.log('[clickUnreadContact] 点击完成')
   await randomDelayIn(150, 250)
 }
+
+// ── 好友请求操作 ──
+
+/**
+ * 业务原子 5：点击"新的朋友"入口
+ * 用于进入好友请求列表
+ */
+export async function clickNewFriendsAction(
+  coordinates: [number, number]
+): Promise<void> {
+  const robot = getRobot()
+  if (!robot) return
+
+  const [newFriendsX, newFriendsY] = coordinates
+  console.log('[clickNewFriends] 点击新的朋友入口', {
+    newFriendsX,
+    newFriendsY
+  })
+
+  await humanLikeMove(newFriendsX, newFriendsY)
+  await randomDelayIn(150, 250)
+
+  robot.mouseClick('left')
+  console.log('[clickNewFriends] 点击完成')
+  await randomDelayIn(300, 500) // 等待列表加载
+}
+
+/**
+ * 业务原子 6：点击好友请求列表中的第一个请求项
+ */
+export async function clickFriendRequestItemAction(
+  coordinates: [number, number]
+): Promise<void> {
+  const robot = getRobot()
+  if (!robot) return
+
+  const [itemX, itemY] = coordinates
+  console.log('[clickFriendRequestItem] 点击好友请求项', {
+    itemX,
+    itemY
+  })
+
+  await humanLikeMove(itemX, itemY)
+  await randomDelayIn(150, 250)
+
+  robot.mouseClick('left')
+  console.log('[clickFriendRequestItem] 点击完成')
+  await randomDelayIn(200, 400) // 等待详情展开
+}
+
+/**
+ * 业务原子 7：点击"接受"按钮
+ * 用于接受好友请求
+ */
+export async function clickAcceptFriendAction(
+  coordinates: [number, number]
+): Promise<void> {
+  const robot = getRobot()
+  if (!robot) return
+
+  const [acceptX, acceptY] = coordinates
+  console.log('[clickAcceptFriend] 点击接受按钮', {
+    acceptX,
+    acceptY
+  })
+
+  await humanLikeMove(acceptX, acceptY)
+  await randomDelayIn(100, 200)
+
+  robot.mouseClick('left')
+  console.log('[clickAcceptFriend] 点击完成，好友请求已接受')
+  await randomDelayIn(200, 400) // 等待处理完成
+}

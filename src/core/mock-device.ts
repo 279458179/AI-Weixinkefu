@@ -84,4 +84,49 @@ export class MockDevice implements DesktopDevice {
   async clickAt(x: number, y: number): Promise<void> {
     console.log(`[MockDevice] Click: (${x}, ${y})`)
   }
+
+  // ── 好友请求检测与处理 ──
+
+  async hasFriendRequest(): Promise<{
+    hasRequest: boolean
+    newFriendsArea?: { bbox: BBox; coordinates: [number, number] }
+  }> {
+    // Mock: 5% 概率检测到好友请求
+    const hasRequest = Math.random() > 0.95
+    if (hasRequest) {
+      return {
+        hasRequest: true,
+        newFriendsArea: {
+          bbox: [100, 100, 200, 150],
+          coordinates: [150, 125]
+        }
+      }
+    }
+    return { hasRequest: false }
+  }
+
+  async clickNewFriends(coordinates: [number, number]): Promise<void> {
+    console.log(`[MockDevice] clickNewFriends: (${coordinates[0]}, ${coordinates[1]})`)
+  }
+
+  async detectFriendRequestItem(): Promise<{
+    success: boolean
+    requestItem?: { coordinates: [number, number] }
+    acceptButton?: { coordinates: [number, number] }
+  }> {
+    // Mock: 模拟检测成功
+    return {
+      success: true,
+      requestItem: { coordinates: [300, 200] },
+      acceptButton: { coordinates: [400, 250] }
+    }
+  }
+
+  async clickFriendRequestItem(coordinates: [number, number]): Promise<void> {
+    console.log(`[MockDevice] clickFriendRequestItem: (${coordinates[0]}, ${coordinates[1]})`)
+  }
+
+  async clickAcceptFriend(coordinates: [number, number]): Promise<void> {
+    console.log(`[MockDevice] clickAcceptFriend: (${coordinates[0]}, ${coordinates[1]})`)
+  }
 }

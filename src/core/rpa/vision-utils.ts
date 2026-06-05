@@ -33,6 +33,9 @@ export interface LayoutCache {
   // ── 输入框区域（从 chatMainArea 反推） ──
   messageInputArea: LayoutAreaItem | null // 文字输入框（chatMainArea 底边 → 窗口底边）
 
+  // ── 好友请求区域 ──
+  newFriendsArea: LayoutAreaItem | null // "新的朋友"入口（好友请求检测用）
+
   timestamp: number
   appType: AppType
 }
@@ -442,6 +445,220 @@ export function getInputAreaFromCache(appType: AppType): LayoutAreaItem | null {
   })
 
   return messageInputArea
+}
+
+// ── 好友请求检测 ──
+
+const NEW_FRIENDS_PROMPTS: Record<'weixin' | 'wework', { prompt: string }> = {
+  weixin: {
+    prompt: `你是一个微信布局解析专家。你必须严格按照指定格式输出坐标。
+
+## 微信桌面端布局 - 新的朋友入口
+- 最左侧导航栏：头像、聊天入口💬、联系人图标
+- 当有好友请求时，联系人图标或顶部会出现"新的朋友"提示
+
+## 你的任务
+框选"新的朋友"入口区域（通常是联系人列表顶部或导航栏中的联系人图标附近），输出坐标。
+
+## 输出格式（必须严格遵守）
+使用 <bbox>x1,y1,x2,y2</bbox> 格式，坐标范围 0-1000：
+- x1,y1 是左上角坐标
+- x2,y2 是右下角坐标
+
+示例输出：
+<bbox>10,100,60,150</bbox>
+
+注意：只输出坐标，不要输出任何其他文字或解释。`
+  },
+  wework: {
+    prompt: `你是一个企业微信布局解析专家。你必须严格按照指定格式输出坐标。
+
+## 企业微信桌面端布局 - 新的朋友入口
+- 左侧导航栏有通讯录图标
+- 当有好友请求时，通讯录或消息列表会出现提示
+
+## 你的任务
+框选好友请求入口区域，输出坐标。
+
+## 输出格式（必须严格遵守）
+使用 <bbox>x1,y1,x2,y2</bbox> 格式，坐标范围 0-1000。
+
+示例输出：
+<bbox>10,100,60,150</bbox>
+
+注意：只输出坐标，不要输出任何其他文字或解释。`
+  }
+}
+
+const FRIEND_REQUEST_DETAIL_PROMPTS: Record<'weixin' | 'wework', { prompt: string }> = {
+  weixin: {
+    prompt: `你是一个微信布局解析专家。你必须严格按照指定格式输出坐标。
+
+## 微信好友请求详情页布局
+- 页面显示好友请求列表，每个请求项包含头像、昵称、"接受"按钮
+- 第一条请求在最上方
+
+## 你的任务
+框选以下两个区域，输出坐标。
+
+## 输出格式（必须严格遵守）
+每个区域使用 <bbox>x1,y1,x2,y2</bbox> 格式，坐标范围 0-1000：
+- x1,y1 是左上角坐标
+- x2,y2 是右下角坐标
+
+## 必须输出
+1. <bbox>x1,y1,x2,y2</bbox> — 好友请求列表第一项（头像+昵称区域）
+2. <bbox>x1,y1,x2,y2</bbox> — 第一项的"接受"按钮区域
+
+示例输出：
+<bbox>100,50,400,100</bbox>
+<bbox>350,60,400,90</bbox>
+
+注意：只输出坐标，不要输出任何其他文字或解释。`
+  },
+  wework: {
+    prompt: `你是一个企业微信布局解析专家。你必须严格按照指定格式输出坐标。
+
+## 企业微信好友请求详情页布局
+- 页面显示好友请求列表，每项包含头像、昵称、接受按钮
+
+## 你的任务
+框选好友请求第一项和其"接受"按钮，输出坐标。
+
+## 输出格式
+使用 <bbox>x1,y1,x2,y2</bbox> 格式，坐标范围 0-1000。
+
+## 必须输出
+1. <bbox>x1,y1,x2,y2</bbox> — 好友请求列表第一项
+2. <bbox>x1,y1,x2,y2</bbox> — 第一项的"接受"按钮
+
+示例输出：
+<bbox>100,50,400,100</bbox>
+<bbox>350,60,400,90</bbox>
+
+注意：只输出坐标，不要输出任何其他文字或解释。`
+  }
+}
+
+/**
+ * 检测"新的朋友"入口区域
+ * 用于好友请求检测
+ */
+export async function detectNewFriendsArea(
+  aiClient: AIClient,
+  appType: AppType
+): Promise<{
+  success: boolean
+  newFriendsArea?: { bbox: BBox; coordinates: [number, number] }
+  error?: string
+}> {
+  try {
+    const screenshotResult = await captureWechatWindow(appType)
+    if (!screenshotResult.success || !screenshotResult.screenshotBase64) {
+      return { success: false, error: screenshotResult.error || '截图失败' }
+    }
+
+    const windowInfo = await getWindowInfo(appType, false)
+    if (!windowInfo?.bounds || !windowInfo?.scaleFactor) {
+      return { success: false, error: '获取窗口信息失败' }
+    }
+
+    const promptKey = appType === 'wework' ? 'wework' : 'weixin'
+    const config = NEW_FRIENDS_PROMPTS[promptKey]
+
+    console.log('[VisionUtils] 调用 VLM 检测新的朋友入口...')
+    const vlmResult = await aiClient.detectVision(config.prompt, screenshotResult.screenshotBase64)
+    console.log('[VisionUtils] VLM 返回:', vlmResult.slice(0, 300))
+
+    const bboxes = parseBBoxes(vlmResult)
+    if (bboxes.length === 0) {
+      return { success: false, error: '未检测到新的朋友入口' }
+    }
+
+    const { bounds, scaleFactor } = windowInfo
+    const newFriendsCoords = bboxToScreenCoords(bboxes[0], bounds, scaleFactor)
+    const newFriendsArea = { bbox: bboxes[0], coordinates: newFriendsCoords }
+
+    // 更新缓存
+    const existingCache = getLayoutCache(appType)
+    setLayoutCache(appType, {
+      ...(existingCache || {
+        chatEntranceArea: null,
+        firstContact: null,
+        searchInputBox: null,
+        headerArea: null,
+        chatMainArea: null,
+        messageInputArea: null
+      }),
+      newFriendsArea,
+      timestamp: Date.now(),
+      appType
+    } as LayoutCache)
+
+    console.log('[VisionUtils] 新的朋友入口检测完成:', newFriendsArea.coordinates)
+
+    return { success: true, newFriendsArea }
+  } catch (error: any) {
+    console.error('[VisionUtils] 检测新的朋友入口失败:', error)
+    return { success: false, error: error?.message || String(error) }
+  }
+}
+
+/**
+ * 检测好友请求详情页的请求项和接受按钮
+ * 用于处理好友请求（点击后动态检测）
+ */
+export async function detectFriendRequestDetail(
+  aiClient: AIClient,
+  appType: AppType
+): Promise<{
+  success: boolean
+  requestItem?: { bbox: BBox; coordinates: [number, number] }
+  acceptButton?: { bbox: BBox; coordinates: [number, number] }
+  error?: string
+}> {
+  try {
+    const screenshotResult = await captureWechatWindow(appType)
+    if (!screenshotResult.success || !screenshotResult.screenshotBase64) {
+      return { success: false, error: screenshotResult.error || '截图失败' }
+    }
+
+    const windowInfo = await getWindowInfo(appType, false)
+    if (!windowInfo?.bounds || !windowInfo?.scaleFactor) {
+      return { success: false, error: '获取窗口信息失败' }
+    }
+
+    const promptKey = appType === 'wework' ? 'wework' : 'weixin'
+    const config = FRIEND_REQUEST_DETAIL_PROMPTS[promptKey]
+
+    console.log('[VisionUtils] 调用 VLM 检测好友请求详情...')
+    const vlmResult = await aiClient.detectVision(config.prompt, screenshotResult.screenshotBase64)
+    console.log('[VisionUtils] VLM 返回:', vlmResult.slice(0, 300))
+
+    const bboxes = parseBBoxes(vlmResult)
+    if (bboxes.length < 2) {
+      return { success: false, error: '未检测到好友请求项或接受按钮' }
+    }
+
+    const { bounds, scaleFactor } = windowInfo
+
+    // 第一个 bbox 是请求项，第二个是接受按钮
+    const requestItemCoords = bboxToScreenCoords(bboxes[0], bounds, scaleFactor)
+    const requestItem = { bbox: bboxes[0], coordinates: requestItemCoords }
+
+    const acceptCoords = bboxToScreenCoords(bboxes[1], bounds, scaleFactor)
+    const acceptButton = { bbox: bboxes[1], coordinates: acceptCoords }
+
+    console.log('[VisionUtils] 好友请求详情检测完成:', {
+      requestItem: requestItem.coordinates,
+      acceptButton: acceptButton.coordinates
+    })
+
+    return { success: true, requestItem, acceptButton }
+  } catch (error: any) {
+    console.error('[VisionUtils] 检测好友请求详情失败:', error)
+    return { success: false, error: error?.message || String(error) }
+  }
 }
 
 // ── 布局主检测 Prompt ──
